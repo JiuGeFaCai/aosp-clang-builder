@@ -1,23 +1,23 @@
-name: Build AOSP Clang
+name: 编译 AOSP Clang
 
 on:
   workflow_dispatch:
     inputs:
       clang_revision:
-        description: "AOSP revision, e.g. r536225 or r547379"
+        description: "AOSP Clang 版本编号，例如 r536225、r547379"
         required: true
         default: "r536225"
         type: string
       toolchain_ref:
-        description: "Optional llvm_android commit or branch; overrides automatic selection"
+        description: "AOSP 工具链配置与补丁的提交 SHA 或分支（可选）；留空自动选择"
         default: ""
         type: string
       llvm_ref:
-        description: "Optional upstream LLVM commit; normally read from AOSP metadata"
+        description: "LLVM 基础源码的提交 SHA 或分支（可选）；留空使用 AOSP 指定的提交"
         default: ""
         type: string
       runner:
-        description: "Build host; ARM64 users normally choose ubuntu-22.04-arm"
+        description: "编译主机系统；ARM64 通常选 ubuntu-22.04-arm，兼顾 Ubuntu 24.04 兼容性"
         default: "ubuntu-22.04-arm"
         type: choice
         options:
@@ -26,19 +26,19 @@ on:
           - ubuntu-22.04
           - ubuntu-24.04
       targets:
-        description: "LLVM backends, separated by semicolons"
+        description: "生成代码的目标架构，用英文分号分隔，例如 AArch64;ARM;X86;BPF"
         default: "AArch64;ARM;X86;BPF"
         type: string
       projects:
-        description: "clang;lld, optionally add ;clang-tools-extra"
+        description: "构建项目，需包含 clang;lld；需要额外工具时添加 ;clang-tools-extra"
         default: "clang;lld"
         type: string
       jobs:
-        description: "Compile jobs: 0 chooses automatically; linking uses one job"
+        description: "编译并行数：0 按 CPU 和内存自动选择；链接固定使用 1 个任务"
         default: "0"
         type: string
       cmake_args:
-        description: "Optional additional -DKEY=VALUE CMake definitions"
+        description: "额外 CMake 参数（可选），例如 -DLLVM_ENABLE_ASSERTIONS=ON"
         default: ""
         type: string
 
@@ -51,6 +51,7 @@ concurrency:
 
 jobs:
   build:
+    name: 构建工具链
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 360
     defaults:
@@ -67,13 +68,15 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
-      - uses: actions/checkout@v7.0.1
+      - name: 检出项目源码
+        uses: actions/checkout@v7.0.1
 
-      - uses: actions/setup-python@v7.0.0
+      - name: 配置 Python 3.12
+        uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.12"
 
-      - name: Prepare runner
+      - name: 准备编译环境
         run: |
           set -euo pipefail
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/share/powershell /opt/ghc /opt/hostedtoolcache/CodeQL
@@ -88,7 +91,7 @@ jobs:
           df -h .
           python -m unittest discover -s tests -v
 
-      - name: Fetch source and apply AOSP patches
+      - name: 下载源码并应用 AOSP 补丁
         run: |
           set -euo pipefail
           python scripts/build.py prepare \
@@ -97,7 +100,7 @@ jobs:
             --llvm-ref "$LLVM_REF" \
             2>&1 | tee .build/logs/prepare.log
 
-      - name: Build and install toolchain
+      - name: 编译并安装工具链
         run: |
           set -euo pipefail
           python scripts/build.py build \
@@ -107,17 +110,17 @@ jobs:
             --cmake-args="$CMAKE_ARGS" \
             2>&1 | tee .build/logs/build.log
 
-      - name: Verify native tools and cross compilation
+      - name: 验证主机架构与交叉编译
         run: |
           set -euo pipefail
           python scripts/build.py verify 2>&1 | tee .build/logs/verify.log
 
-      - name: Check Ubuntu 24.04 compatibility
+      - name: 验证 Ubuntu 24.04 兼容性
         run: |
           set -euo pipefail
           python scripts/build.py compatibility 2>&1 | tee .build/logs/ubuntu-24.04.log
 
-      - name: Package
+      - name: 打包工具链
         run: |
           set -euo pipefail
           python scripts/build.py package 2>&1 | tee .build/logs/package.log
@@ -127,17 +130,17 @@ jobs:
           info = json.loads(Path(".build/source-lock.json").read_text())
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write(
-                  f"Built **{info['clang_revision']} / Clang {info['clang_version']}** "
-                  f"for **Linux {info['host_architecture']}**.\n\n"
-                  f"LLVM commit: {info['llvm_commit']}\n\n"
-                  f"AOSP patches commit: {info['toolchain_commit']}\n\n"
-                  f"Applied patches: {len(info['patches'])}; "
-                  f"minimum glibc: {info['minimum_glibc']}.\n\n"
-                  "Ubuntu 24.04 native execution and linking check passed.\n"
+                  f"已编译 **{info['clang_revision']} / Clang {info['clang_version']}**，"
+                  f"运行主机为 **Linux {info['host_architecture']}**。\n\n"
+                  f"LLVM 基础提交：{info['llvm_commit']}\n\n"
+                  f"AOSP 补丁集提交：{info['toolchain_commit']}\n\n"
+                  f"已应用补丁：{len(info['patches'])} 个；"
+                  f"最低 glibc 版本：{info['minimum_glibc']}。\n\n"
+                  "Ubuntu 24.04 运行与链接验证已通过。\n"
               )
           PY
 
-      - name: Upload toolchain
+      - name: 上传工具链压缩包
         uses: actions/upload-artifact@v7.0.2
         with:
           name: "aosp-clang-${{ inputs.clang_revision }}-${{ runner.arch }}"
@@ -146,7 +149,7 @@ jobs:
           compression-level: 0
           retention-days: 30
 
-      - name: Upload build logs and source lock
+      - name: 上传编译日志与源码记录
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:

@@ -18,7 +18,7 @@ ARM64 和 x86_64 指的是 **Clang 自身运行的主机架构**；`targets` 指
 
 1. 创建名为 `aosp-clang-builder` 的 GitHub 仓库。公开仓库可使用免费的标准 GitHub-hosted runner。
 2. 将本项目内容上传到仓库的默认分支，包含隐藏目录 `.github`。`build.yml` 必须位于 `.github/workflows/build.yml`。
-3. 打开 **Actions → Build AOSP Clang → Run workflow**。
+3. 打开 **Actions → 编译 AOSP Clang → Run workflow**。
 4. 第一次保留默认参数，即编译 `r536225` 的 ARM64 Linux 主机版。
 5. 成功后在运行页面的 **Artifacts** 下载工具链。解开 Artifact 的 ZIP 后，再解开里面的 `.tar.xz`。
 
