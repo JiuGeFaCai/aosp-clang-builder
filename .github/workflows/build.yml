@@ -1,0 +1,159 @@
+name: Build AOSP Clang
+
+on:
+  workflow_dispatch:
+    inputs:
+      clang_revision:
+        description: "AOSP revision, e.g. r536225 or r547379"
+        required: true
+        default: "r536225"
+        type: string
+      toolchain_ref:
+        description: "Optional llvm_android commit or branch; overrides automatic selection"
+        default: ""
+        type: string
+      llvm_ref:
+        description: "Optional upstream LLVM commit; normally read from AOSP metadata"
+        default: ""
+        type: string
+      runner:
+        description: "Build host; ARM64 users normally choose ubuntu-22.04-arm"
+        default: "ubuntu-22.04-arm"
+        type: choice
+        options:
+          - ubuntu-22.04-arm
+          - ubuntu-24.04-arm
+          - ubuntu-22.04
+          - ubuntu-24.04
+      targets:
+        description: "LLVM backends, separated by semicolons"
+        default: "AArch64;ARM;X86;BPF"
+        type: string
+      projects:
+        description: "clang;lld, optionally add ;clang-tools-extra"
+        default: "clang;lld"
+        type: string
+      jobs:
+        description: "Compile jobs: 0 chooses automatically; linking uses one job"
+        default: "0"
+        type: string
+      cmake_args:
+        description: "Optional additional -DKEY=VALUE CMake definitions"
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}-${{ inputs.clang_revision }}-${{ inputs.runner }}"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      CLANG_REVISION: ${{ inputs.clang_revision }}
+      TOOLCHAIN_REF: ${{ inputs.toolchain_ref }}
+      LLVM_REF: ${{ inputs.llvm_ref }}
+      BUILD_TARGETS: ${{ inputs.targets }}
+      BUILD_PROJECTS: ${{ inputs.projects }}
+      BUILD_JOBS: ${{ inputs.jobs }}
+      CMAKE_ARGS: ${{ inputs.cmake_args }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Prepare runner
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /usr/local/share/powershell /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang lld git patch ninja-build binutils file xz-utils ca-certificates \
+            zlib1g-dev libzstd-dev
+          python -m pip install --disable-pip-version-check "cmake>=3.28,<4"
+          mkdir -p .build/logs
+          uname -m
+          cmake --version
+          df -h .
+          python -m unittest discover -s tests -v
+
+      - name: Fetch source and apply AOSP patches
+        run: |
+          set -euo pipefail
+          python scripts/build.py prepare \
+            --clang-revision "$CLANG_REVISION" \
+            --toolchain-ref "$TOOLCHAIN_REF" \
+            --llvm-ref "$LLVM_REF" \
+            2>&1 | tee .build/logs/prepare.log
+
+      - name: Build and install toolchain
+        run: |
+          set -euo pipefail
+          python scripts/build.py build \
+            --targets "$BUILD_TARGETS" \
+            --projects "$BUILD_PROJECTS" \
+            --jobs "$BUILD_JOBS" \
+            --cmake-args="$CMAKE_ARGS" \
+            2>&1 | tee .build/logs/build.log
+
+      - name: Verify native tools and cross compilation
+        run: |
+          set -euo pipefail
+          python scripts/build.py verify 2>&1 | tee .build/logs/verify.log
+
+      - name: Check Ubuntu 24.04 compatibility
+        run: |
+          set -euo pipefail
+          python scripts/build.py compatibility 2>&1 | tee .build/logs/ubuntu-24.04.log
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          python scripts/build.py package 2>&1 | tee .build/logs/package.log
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          info = json.loads(Path(".build/source-lock.json").read_text())
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(
+                  f"Built **{info['clang_revision']} / Clang {info['clang_version']}** "
+                  f"for **Linux {info['host_architecture']}**.\n\n"
+                  f"LLVM commit: {info['llvm_commit']}\n\n"
+                  f"AOSP patches commit: {info['toolchain_commit']}\n\n"
+                  f"Applied patches: {len(info['patches'])}; "
+                  f"minimum glibc: {info['minimum_glibc']}.\n\n"
+                  "Ubuntu 24.04 native execution and linking check passed.\n"
+              )
+          PY
+
+      - name: Upload toolchain
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: "aosp-clang-${{ inputs.clang_revision }}-${{ runner.arch }}"
+          path: dist/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload build logs and source lock
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: "aosp-clang-logs-${{ github.run_id }}"
+          path: |
+            .build/logs/
+            .build/source-lock.json
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 14
