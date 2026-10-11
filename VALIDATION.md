@@ -10,4 +10,6 @@
 
 本地验证范围为工作流、版本元数据、补丁链与 Python 测试。完整 CMake 配置、LLVM 编译和 Ubuntu 24.04 容器运行检查由 GitHub Actions 执行，结果以仓库中的 Actions 运行记录为准。
 
+首次 CI 已成功编译 ARM64 Clang 19.0.1，并通过交叉编译及 ThinLTO/KCFI 检查，最低 glibc 为 2.35。干净的 Ubuntu 24.04 容器缺少 lld 自动引入的 libxml2.so.2；已在默认构建配置中关闭可选的 libxml2 依赖，修复后的构建结果见最新 Actions 运行。
+
 上传项目并启动工作流后，将执行真实编译、所有安装工具的 ELF 架构与动态依赖检查、所选后端的交叉编译检查、AArch64 ThinLTO/KCFI 链接检查，以及 Ubuntu 24.04 容器检查。全部通过后才上传工具链压缩包。

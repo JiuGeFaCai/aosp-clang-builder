@@ -57,7 +57,7 @@ fc57f88f007497a4ead0ec8607ac66e1847b02d6
 
 `llvm_ref` 是高级覆盖项：如果与 AOSP 声明的基础提交不同，产物记录会标明 `custom_llvm_base: true`，补丁可能无法应用。一般保留空白即可。
 
-版本需要提供 `android_version.py` 和 `patches/PATCHES.json`；当前与旧版的两种脚本目录布局都可识别。补丁按 `PATCHES.json` 的顺序和版本区间应用，使用官方相同的 GNU patch 参数，任何补丁失败都会停止。构建使用 Release 配置，静态链接 libstdc++ 和 libgcc；性能优化配置与 Google 官方 PGO/BOLT/MLGO 制品可能不同。
+版本需要提供 `android_version.py` 和 `patches/PATCHES.json`；当前与旧版的两种脚本目录布局都可识别。补丁按 `PATCHES.json` 的顺序和版本区间应用，使用官方相同的 GNU patch 参数，任何补丁失败都会停止。构建使用 Release 配置，静态链接 libstdc++ 和 libgcc，并禁用可选的 libxml2 依赖以减少主机运行依赖；性能优化配置与 Google 官方 PGO/BOLT/MLGO 制品可能不同。
 
 版本依据：[官方 r536225 manifest 的镜像](https://github.com/msft-mirror-aosp/platform.prebuilts.clang.host.linux-x86/blob/android16-release/clang-r536225/manifest_12833971.xml)、[固定的 AOSP 版本元数据](https://github.com/aosp-mirror-neo/toolchain_llvm_android/blob/43ef7af1325b43e13d926d74a89741d4ace5fcf8/src/llvm_android/android_version.py)。
 
