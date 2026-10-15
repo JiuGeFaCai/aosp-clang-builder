@@ -489,26 +489,22 @@ def compatibility(args, work):
 
 
 def write_usage_files(prefix, metadata):
-    installer = prefix / "install.sh"
-    shutil.copyfile(Path(__file__).with_name("install-toolchain.sh"), installer)
-    installer.chmod(0o755)
+    (prefix / "install.sh").unlink(missing_ok=True)
     (prefix / "README.txt").write_text(
         f"AOSP Clang {metadata['clang_revision']} / Linux {metadata['host_architecture']}\n\n"
         "在同一 CPU 架构的 Ubuntu 22.04 / 24.04（含手机 chroot / proot）中使用。\n"
         "解压后进入本目录即可运行，无需设置头文件、资源目录或动态库路径：\n\n"
         "  ./bin/clang --version\n"
         "  ./bin/ld.lld --version\n\n"
-        "若要在任意目录直接输入 clang，运行一次：\n\n"
-        "  sudo ./install.sh\n\n"
-        "proot 中已是 root 时直接运行 ./install.sh。安装只在 /usr/local/bin 创建链接；\n"
-        "安装后请保留此目录。整包可以移动，移动后需要更新已安装的命令链接。\n\n"
+        "保持 bin、lib 等目录的相对位置，整个工具链文件夹可直接移动或重命名。\n"
+        "Clang 会自动查找包内的内置头文件和同目录下的 LLVM 工具。\n\n"
         "编译内核可使用 make LLVM=/工具链所在目录/bin/ ARCH=arm64。\n"
         "普通 Ubuntu C/C++ 程序所需的系统头文件和运行库由 build-essential 提供。\n"
     )
 
 
 def relocation(args, work):
-    """Check resource discovery, sibling linker and installed command links."""
+    """Check direct tool use and resource/linker discovery after relocation."""
     metadata = load_metadata(work)
     prefix = Path(metadata["install_prefix"])
     write_usage_files(prefix, metadata)
@@ -541,25 +537,22 @@ def relocation(args, work):
                 continue
             linked = relocation_root / "smoke.elf"
             flags = ["-flto=thin", "-fsanitize=kcfi"] if backend == "AArch64" else []
-            run([
+            command = [
                 compiler, f"--target={triple}", "-O2", "-ffreestanding", "-fno-stack-protector",
                 "-nostdlib", "-fuse-ld=lld", "-Wl,-e,_start", *flags, sample, "-o", linked,
-            ], env=environment)
+            ]
+            plan = run([*command, "-###"], capture=True, display=False, env=environment)
+            if str(moved / "bin/ld.lld") not in plan:
+                raise BuildError("Relocated Clang did not select its bundled lld.")
+            run(command, env=environment)
             if elf_machine(linked) != machine:
                 raise BuildError("Relocated Clang/lld produced the wrong target architecture.")
             break
-        command_prefix = relocation_root / "command links"
-        run([moved / "install.sh", "--prefix", command_prefix], env=environment)
-        for command in ("clang", "clang++", "ld.lld", "llvm-ar"):
-            run([command_prefix / "bin" / command, "--version"], env=environment)
-        installed_resource = Path(run([
-            command_prefix / "bin/clang", "-print-resource-dir",
-        ], capture=True, env=environment).strip())
-        if installed_resource.resolve() != resource.resolve():
-            raise BuildError("Installed command links did not preserve resource discovery.")
+        for name in ("clang++", "ld.lld", "llvm-ar"):
+            run([moved / "bin" / name, "--version"], env=environment)
     finally:
         shutil.rmtree(relocation_root)
-    metadata["relocation_verification"] = "passed: moved directory with spaces, clean environment, bundled headers, sibling lld, command links"
+    metadata["relocation_verification"] = "passed: moved directory with spaces, clean environment, bundled headers, bundled lld, direct LLVM tools"
     save_metadata(work, metadata)
     (prefix / "BUILD_INFO.json").write_text(json.dumps(metadata, indent=2) + "\n")
 

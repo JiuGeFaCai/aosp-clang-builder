@@ -121,17 +121,9 @@ tar -xf clang-r536225-linux-aarch64.tar.xz
 ./clang-r536225/bin/ld.lld --version
 ```
 
-手机中的 Ubuntu chroot / proot 同样这样使用。Clang 自动查找包内头文件和同目录下的 lld，无需设置 `LD_LIBRARY_PATH`、`C_INCLUDE_PATH` 或 `-resource-dir`。Actions 会将工具链移动到含空格的新目录，清除路径相关的环境变量，再验证头文件发现、编译链接和命令安装。
+手机中的 Ubuntu chroot / proot 同样这样使用。这是一套独立工具链，保持 `bin`、`lib` 等目录的相对位置，整个文件夹可移动或重命名。Clang 自动查找包内头文件和同目录下的 lld，无需设置 `LD_LIBRARY_PATH`、`C_INCLUDE_PATH` 或 `-resource-dir`。Actions 会将工具链移动到含空格的新目录，清除路径相关的环境变量，再验证头文件发现、自动使用包内 lld 编译链接，以及各个 LLVM 工具的直接运行。
 
-若要在任意目录直接输入 `clang`，进入解压后的工具链目录，执行一次：
-
-```bash
-cd clang-r487747c
-sudo ./install.sh
-clang --version
-```
-
-proot 中已是 root 时执行 `./install.sh` 即可。脚本在 `/usr/local/bin` 创建 `clang`、`clang++`、`ld.lld` 和其他 LLVM 工具的链接；遇到已有同名文件会停止。安装后保留工具链目录；移动目录后需要更新这些命令链接。普通 Ubuntu C/C++ 程序所需的系统头文件和运行库由 `build-essential` 提供。
+普通 Ubuntu C/C++ 程序所需的系统头文件和运行库由 `build-essential` 提供。
 
 对已成功的旧构建，可运行 **Actions → 整理已编译的 Clang 工具链**，填写原构建链接末尾的运行编号，并选择同一架构的 runner。该工作流复用原有二进制，整理目录后重新验证并打包，无需重编 LLVM。
 

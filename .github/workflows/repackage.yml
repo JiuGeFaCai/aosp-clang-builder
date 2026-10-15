@@ -64,8 +64,8 @@ jobs:
               summary.write(
                   f"已整理 **{info['clang_revision']} / Linux {info['host_architecture']}**。\n\n"
                   f"源构建：{info['repackaged_from']['run_id']}。\n\n"
-                  "解压后直接运行 `bin/clang`，或运行 `sudo ./install.sh` 安装命令链接。\n\n"
-                  "已通过移动目录、内置头文件、自动调用 lld、命令链接及 Ubuntu 24.04 检查。\n"
+                  "独立工具链：解压后直接运行 `bin/clang`，整个文件夹可移动或重命名。\n\n"
+                  "已通过移动目录、内置头文件、自动调用包内 lld、LLVM 工具及 Ubuntu 24.04 检查。\n"
               )
           PY
 
