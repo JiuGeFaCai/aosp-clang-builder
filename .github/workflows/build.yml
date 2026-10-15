@@ -115,6 +115,11 @@ jobs:
           set -euo pipefail
           python scripts/build.py verify 2>&1 | tee .build/logs/verify.log
 
+      - name: 验证移动目录与直接使用
+        run: |
+          set -euo pipefail
+          python scripts/build.py relocation 2>&1 | tee .build/logs/relocation.log
+
       - name: 验证 Ubuntu 24.04 兼容性
         run: |
           set -euo pipefail

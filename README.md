@@ -2,7 +2,7 @@
 
 在 GitHub Actions 原生 ARM64 / x86_64 Linux runner 上，按 AOSP 指定的 LLVM 基础提交和补丁集重编译 Clang。默认版本是 `r536225`，可在运行时自定义版本、提交、LLVM 后端和 CMake 参数。
 
-产物包含 Clang、lld、常用 LLVM 内核工具、Clang 内置头文件、源码与构建记录，以及 SHA-256 校验文件。
+产物包含 Clang、lld、常用 LLVM 内核工具、Clang 内置头文件、源码与构建记录，以及 SHA-256 校验文件。压缩包内采用标准的 `clang-r<版本>/bin`、`lib` 目录，可解压到任意目录直接运行。
 
 ## Ubuntu 22.04 编译，Ubuntu 24.04 能用吗？
 
@@ -117,9 +117,28 @@ BUILD_INFO.json
 ```bash
 sha256sum -c clang-r536225-linux-aarch64.tar.xz.sha256
 tar -xf clang-r536225-linux-aarch64.tar.xz
-export PATH="$PWD/clang-r536225-linux-aarch64/bin:$PATH"
+./clang-r536225/bin/clang --version
+./clang-r536225/bin/ld.lld --version
+```
+
+手机中的 Ubuntu chroot / proot 同样这样使用。Clang 自动查找包内头文件和同目录下的 lld，无需设置 `LD_LIBRARY_PATH`、`C_INCLUDE_PATH` 或 `-resource-dir`。Actions 会将工具链移动到含空格的新目录，清除路径相关的环境变量，再验证头文件发现、编译链接和命令安装。
+
+若要在任意目录直接输入 `clang`，进入解压后的工具链目录，执行一次：
+
+```bash
+cd clang-r487747c
+sudo ./install.sh
 clang --version
-file "$(command -v clang)"
+```
+
+proot 中已是 root 时执行 `./install.sh` 即可。脚本在 `/usr/local/bin` 创建 `clang`、`clang++`、`ld.lld` 和其他 LLVM 工具的链接；遇到已有同名文件会停止。安装后保留工具链目录；移动目录后需要更新这些命令链接。普通 Ubuntu C/C++ 程序所需的系统头文件和运行库由 `build-essential` 提供。
+
+对已成功的旧构建，可运行 **Actions → 整理已编译的 Clang 工具链**，填写原构建链接末尾的运行编号，并选择同一架构的 runner。该工作流复用原有二进制，整理目录后重新验证并打包，无需重编 LLVM。
+
+编译普通 Make 内核时，也可直接指定工具目录，无需修改环境变量：
+
+```bash
+make LLVM=/你的工具链目录/clang-r487747c/bin/ ARCH=arm64
 ```
 
 对使用普通 Make 的内核，可指定 `LLVM=1` 和对应交叉编译目标。Android 6.12 GKI 默认使用 Kleaf/Bazel，接入时还需配置 ARM64 主机版本的 Bazel、工具链路径及其他构建工具。这个项目的成功校验范围是编译器与 LLVM 工具的架构、交叉编译、链接和 AArch64 ThinLTO/KCFI；完整 GKI 构建仍需使用实际内核源码验证。

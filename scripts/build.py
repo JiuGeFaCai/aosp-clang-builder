@@ -53,10 +53,10 @@ class BuildError(RuntimeError):
     pass
 
 
-def run(command, *, cwd=None, capture=False, display=True):
+def run(command, *, cwd=None, capture=False, display=True, env=None):
     print("+ " + shlex.join(str(x) for x in command), flush=True)
     result = subprocess.run(
-        [str(x) for x in command], cwd=cwd, check=True, text=True,
+        [str(x) for x in command], cwd=cwd, check=True, text=True, env=env,
         stdout=subprocess.PIPE if capture else None,
         stderr=subprocess.STDOUT if capture else None,
     )
@@ -325,7 +325,7 @@ def build(args, work):
     if args.jobs < 0:
         raise BuildError("--jobs must be zero (automatic) or a positive number.")
     jobs = args.jobs or automatic_jobs()
-    prefix = work / "install" / f"clang-{metadata['clang_revision']}-linux-{architecture}"
+    prefix = work / "install" / f"clang-{metadata['clang_revision']}"
     compiler, cxx = compiler_pair()
     linker = next((shutil.which(name) for name in ("ld.lld-22", "ld.lld-21", "ld.lld-20", "ld.lld-19", "ld.lld-18", "ld.lld-17", "ld.lld-16", "ld.lld-15", "ld.lld-14", "ld.lld") if shutil.which(name)), None)
     if not linker:
@@ -488,14 +488,91 @@ def compatibility(args, work):
     (prefix / "BUILD_INFO.json").write_text(json.dumps(metadata, indent=2) + "\n")
 
 
+def write_usage_files(prefix, metadata):
+    installer = prefix / "install.sh"
+    shutil.copyfile(Path(__file__).with_name("install-toolchain.sh"), installer)
+    installer.chmod(0o755)
+    (prefix / "README.txt").write_text(
+        f"AOSP Clang {metadata['clang_revision']} / Linux {metadata['host_architecture']}\n\n"
+        "在同一 CPU 架构的 Ubuntu 22.04 / 24.04（含手机 chroot / proot）中使用。\n"
+        "解压后进入本目录即可运行，无需设置头文件、资源目录或动态库路径：\n\n"
+        "  ./bin/clang --version\n"
+        "  ./bin/ld.lld --version\n\n"
+        "若要在任意目录直接输入 clang，运行一次：\n\n"
+        "  sudo ./install.sh\n\n"
+        "proot 中已是 root 时直接运行 ./install.sh。安装只在 /usr/local/bin 创建链接；\n"
+        "安装后请保留此目录。整包可以移动，移动后需要更新已安装的命令链接。\n\n"
+        "编译内核可使用 make LLVM=/工具链所在目录/bin/ ARCH=arm64。\n"
+        "普通 Ubuntu C/C++ 程序所需的系统头文件和运行库由 build-essential 提供。\n"
+    )
+
+
+def relocation(args, work):
+    """Check resource discovery, sibling linker and installed command links."""
+    metadata = load_metadata(work)
+    prefix = Path(metadata["install_prefix"])
+    write_usage_files(prefix, metadata)
+    checks = work / "checks"
+    checks.mkdir(exist_ok=True)
+    environment = {key: value for key, value in os.environ.items() if key not in {
+        "LD_LIBRARY_PATH", "LIBRARY_PATH", "COMPILER_PATH", "GCC_EXEC_PREFIX",
+        "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH", "OBJC_INCLUDE_PATH",
+    }}
+    environment["PATH"] = "/usr/bin:/bin"
+    relocation_root = checks / "relocated toolchain"
+    if relocation_root.exists():
+        shutil.rmtree(relocation_root)
+    moved = relocation_root / f"clang-{metadata['clang_revision']}"
+    shutil.copytree(prefix, moved, symlinks=True)
+    try:
+        compiler = moved / "bin/clang"
+        run([compiler, "--version"], env=environment)
+        resource = Path(run([compiler, "-print-resource-dir"], capture=True, env=environment).strip())
+        if not resource.resolve().is_relative_to(moved.resolve()) or not (resource / "include/stddef.h").is_file():
+            raise BuildError("Relocated Clang did not find its bundled resource headers.")
+        sample = relocation_root / "headers.c"
+        sample.write_text("#include <stddef.h>\n#include <stdint.h>\n#include <stdarg.h>\n" + SMOKE_SOURCE)
+        run([compiler, "-ffreestanding", "-fsyntax-only", sample], env=environment)
+        for backend, triple, machine in (
+            ("AArch64", "aarch64-linux-gnu", 183), ("ARM", "armv7a-linux-gnueabi", 40),
+            ("X86", "x86_64-linux-gnu", 62), ("RISCV", "riscv64-linux-gnu", 243),
+        ):
+            if backend not in metadata["targets"]:
+                continue
+            linked = relocation_root / "smoke.elf"
+            flags = ["-flto=thin", "-fsanitize=kcfi"] if backend == "AArch64" else []
+            run([
+                compiler, f"--target={triple}", "-O2", "-ffreestanding", "-fno-stack-protector",
+                "-nostdlib", "-fuse-ld=lld", "-Wl,-e,_start", *flags, sample, "-o", linked,
+            ], env=environment)
+            if elf_machine(linked) != machine:
+                raise BuildError("Relocated Clang/lld produced the wrong target architecture.")
+            break
+        command_prefix = relocation_root / "command links"
+        run([moved / "install.sh", "--prefix", command_prefix], env=environment)
+        for command in ("clang", "clang++", "ld.lld", "llvm-ar"):
+            run([command_prefix / "bin" / command, "--version"], env=environment)
+        installed_resource = Path(run([
+            command_prefix / "bin/clang", "-print-resource-dir",
+        ], capture=True, env=environment).strip())
+        if installed_resource.resolve() != resource.resolve():
+            raise BuildError("Installed command links did not preserve resource discovery.")
+    finally:
+        shutil.rmtree(relocation_root)
+    metadata["relocation_verification"] = "passed: moved directory with spaces, clean environment, bundled headers, sibling lld, command links"
+    save_metadata(work, metadata)
+    (prefix / "BUILD_INFO.json").write_text(json.dumps(metadata, indent=2) + "\n")
+
+
 def package(args, work):
     metadata = load_metadata(work)
     if "verification" not in metadata:
         raise BuildError("Run verify before packaging.")
     prefix = Path(metadata["install_prefix"])
+    write_usage_files(prefix, metadata)
     output = Path(args.output_dir).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    archive = output / f"{prefix.name}.tar.xz"
+    archive = output / f"clang-{metadata['clang_revision']}-linux-{metadata['host_architecture']}.tar.xz"
     run(["tar", "-C", prefix.parent, "-I", "xz -T2 -6", "-cf", archive, prefix.name])
     digest = hashlib.sha256()
     with archive.open("rb") as stream:
@@ -508,7 +585,7 @@ def package(args, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("stage", choices=["prepare", "build", "verify", "compatibility", "package", "all"])
+    parser.add_argument("stage", choices=["prepare", "build", "verify", "relocation", "compatibility", "package", "all"])
     parser.add_argument("--clang-revision", default="r536225")
     parser.add_argument("--toolchain-ref", default="")
     parser.add_argument("--llvm-ref", default="")
@@ -522,7 +599,7 @@ def main():
     args = parser.parse_args()
     work = Path(args.work_dir).resolve()
     work.mkdir(parents=True, exist_ok=True)
-    stages = ["prepare", "build", "verify", "package"] if args.stage == "all" else [args.stage]
+    stages = ["prepare", "build", "verify", "relocation", "package"] if args.stage == "all" else [args.stage]
     if args.configure_only and args.stage != "build":
         parser.error("--configure-only is only available for the build stage.")
     for stage in stages:
