@@ -1,7 +1,9 @@
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import subprocess
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -75,6 +77,44 @@ class RevisionTests(unittest.TestCase):
                 "43ef7af1325b43e13d926d74a89741d4ace5fcf8",
             )
             resolve.assert_not_called()
+
+    def test_r487747c_prepares_without_explicit_refs(self):
+        def source_archive(repo, sha, destination, cache):
+            destination.mkdir(parents=True)
+            if repo == builder.TOOLCHAIN_REPO:
+                self.assertEqual(sha, "8443a75fcd5c80245b194f6510b98a11098fe7fe")
+                # Metadata from r487747c's manifest_10087095.xml checkout.
+                (destination / "android_version.py").write_text(
+                    "_svn_revision = 'r487747c'\n"
+                    "_git_sha = 'c4c5e79dd4b4c78eee7cffd9b0d7394b5bedcf12'\n"
+                    "_patch_level = '2'\n"
+                )
+                (destination / "patches").mkdir()
+                (destination / "patches/PATCHES.json").write_text("[]\n")
+            else:
+                self.assertEqual(repo, builder.LLVM_REPO)
+                self.assertEqual(sha, "c4c5e79dd4b4c78eee7cffd9b0d7394b5bedcf12")
+
+        with tempfile.TemporaryDirectory() as directory:
+            for requested in ("r487747c", "clang-r487747c"):
+                with self.subTest(requested=requested):
+                    work = Path(directory) / requested
+                    work.mkdir()
+                    args = SimpleNamespace(clang_revision=requested, toolchain_ref="", llvm_ref="")
+                    with patch.object(builder, "source_archive", side_effect=source_archive), \
+                            patch.object(builder, "github_json") as github:
+                        builder.prepare(args, work)
+                        github.assert_not_called()
+                    metadata = json.loads((work / "source-lock.json").read_text())
+                    self.assertEqual(metadata["clang_revision"], "r487747c")
+                    self.assertEqual(metadata["svn_revision"], 487747)
+                    self.assertEqual(metadata["aosp_patch_level"], "2")
+                    self.assertFalse(metadata["custom_llvm_base"])
+
+    def test_explicit_ref_overrides_r487747c_preset(self):
+        with patch.object(builder, "resolve_ref", return_value="b" * 40) as resolve:
+            self.assertEqual(builder.toolchain_revision("r487747c", "custom-ref"), "b" * 40)
+            resolve.assert_called_once_with(builder.TOOLCHAIN_REPO, "custom-ref")
 
     def test_release_branch_fallback(self):
         for status in (404, 422):

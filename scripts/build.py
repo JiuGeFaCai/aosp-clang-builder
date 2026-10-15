@@ -25,6 +25,8 @@ import urllib.request
 TOOLCHAIN_REPO = "aosp-mirror-neo/toolchain_llvm_android"
 LLVM_REPO = "llvm/llvm-project"
 PRESETS = {
+    # clang-r487747c's manifest_10087095.xml (Android 14).
+    "r487747c": "8443a75fcd5c80245b194f6510b98a11098fe7fe",
     # Android's manifest_12833971.xml; pins the patch set as well as the base.
     "r536225": "43ef7af1325b43e13d926d74a89741d4ace5fcf8",
 }

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       clang_revision:
-        description: "AOSP Clang 版本编号，例如 r536225、r547379"
+        description: "AOSP Clang 版本编号，例如 r536225、r487747c、r547379"
         required: true
         default: "r536225"
         type: string

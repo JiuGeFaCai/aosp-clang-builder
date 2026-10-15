@@ -26,7 +26,7 @@ ARM64 和 x86_64 指的是 **Clang 自身运行的主机架构**；`targets` 指
 
 | 输入 | 默认值 | 用法 |
 | --- | --- | --- |
-| `clang_revision` | `r536225` | AOSP 编号，可写 `clang-r536225`；其他示例：`r547379`、`r522817` |
+| `clang_revision` | `r536225` | AOSP 编号，可写 `clang-r536225`；其他示例：`r487747c`、`r547379`、`r522817` |
 | `toolchain_ref` | 留空 | `llvm_android` 的提交 SHA 或分支；决定版本元数据和补丁集 |
 | `llvm_ref` | 留空 | 上游 `llvm/llvm-project` 的提交 SHA 或 ref；默认使用 AOSP 声明的基础提交 |
 | `runner` | `ubuntu-22.04-arm` | 可选 22.04 / 24.04 的 ARM64 或 x86_64 runner |
@@ -51,15 +51,23 @@ ARM64 和 x86_64 指的是 **Clang 自身运行的主机架构**；`targets` 指
 fc57f88f007497a4ead0ec8607ac66e1847b02d6
 ```
 
+`r487747c` 也提供固定预设，使用官方 `manifest_10087095.xml` 中的 `llvm_android` 提交：
+
+```text
+8443a75fcd5c80245b194f6510b98a11098fe7fe
+```
+
+其基础 LLVM 提交为 `c4c5e79dd4b4c78eee7cffd9b0d7394b5bedcf12`。在 Actions 中填写 `clang_revision=r487747c`，`toolchain_ref` 和 `llvm_ref` 均留空即可；也接受 `clang-r487747c`。
+
 其他不带后缀的版本会先查找 `llvm-r<编号>-release`，再查找 `llvm-r<编号>`，使用分支当前的版本。例如 `r522817` 分支当前元数据声明 `r522817d`，产物会准确记录并使用这个实际编号。工作流将分支解析成完整 SHA，并记录每个实际应用的补丁及其 SHA-256。对重复构建有要求时，将成功运行记录中的 `toolchain_commit` 和 `llvm_commit` 填回两个 ref 输入。
 
-**同一个 r 编号也可能有不同补丁集。** 要重建某个官方包，在它的 `manifest_*.xml` 中查找 `toolchain/llvm_android` 项目，将其 `revision` 填入 `toolchain_ref`；基础 LLVM 提交和补丁级别仍由这份元数据读取。`r536225b` 等带后缀版本必须提供该包对应的 `toolchain_ref`，防止静默使用其他变体的补丁。
+**同一个 r 编号也可能有不同补丁集。** 要重建某个官方包，在它的 `manifest_*.xml` 中查找 `toolchain/llvm_android` 项目，将其 `revision` 填入 `toolchain_ref`；基础 LLVM 提交和补丁级别仍由这份元数据读取。除已固定的 `r487747c` 外，`r536225b` 等带后缀版本必须提供该包对应的 `toolchain_ref`，防止静默使用其他变体的补丁。手动填写的 `toolchain_ref` 优先于预设。
 
 `llvm_ref` 是高级覆盖项：如果与 AOSP 声明的基础提交不同，产物记录会标明 `custom_llvm_base: true`，补丁可能无法应用。一般保留空白即可。
 
 版本需要提供 `android_version.py` 和 `patches/PATCHES.json`；当前与旧版的两种脚本目录布局都可识别。补丁按 `PATCHES.json` 的顺序和版本区间应用，使用官方相同的 GNU patch 参数，任何补丁失败都会停止。构建使用 Release 配置，静态链接 libstdc++ 和 libgcc，并禁用可选的 libxml2 依赖以减少主机运行依赖；性能优化配置与 Google 官方 PGO/BOLT/MLGO 制品可能不同。
 
-版本依据：[官方 r536225 manifest 的镜像](https://github.com/msft-mirror-aosp/platform.prebuilts.clang.host.linux-x86/blob/android16-release/clang-r536225/manifest_12833971.xml)、[固定的 AOSP 版本元数据](https://github.com/aosp-mirror-neo/toolchain_llvm_android/blob/43ef7af1325b43e13d926d74a89741d4ace5fcf8/src/llvm_android/android_version.py)。
+版本依据：[官方 r536225 manifest 的镜像](https://github.com/msft-mirror-aosp/platform.prebuilts.clang.host.linux-x86/blob/android16-release/clang-r536225/manifest_12833971.xml)、[固定的 AOSP 版本元数据](https://github.com/aosp-mirror-neo/toolchain_llvm_android/blob/43ef7af1325b43e13d926d74a89741d4ace5fcf8/src/llvm_android/android_version.py)、[官方 r487747c manifest 的镜像](https://github.com/msft-mirror-aosp/platform.prebuilts.clang.host.linux-x86/blob/android14-release/clang-r487747c/manifest_10087095.xml)、[r487747c 基础源码与补丁记录](https://github.com/msft-mirror-aosp/platform.prebuilts.clang.host.linux-x86/blob/android14-release/clang-r487747c/clang_source_info.md)。
 
 ## 在 Ubuntu 24.04 ARM64 本机运行
 
@@ -73,6 +81,13 @@ python3 scripts/build.py all --clang-revision r536225
 ```
 
 其他版本：
+
+```bash
+python3 scripts/build.py all \
+  --clang-revision r487747c \
+  --work-dir .build-r487747c \
+  --output-dir dist
+```
 
 ```bash
 python3 scripts/build.py all \
